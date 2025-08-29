@@ -24,9 +24,9 @@ class GraphBuilder:
                 print("❌ JSON 파일이 비어있거나 딕셔너리 형태로 입력되지 않았습니다.")
                 return False
 
+            # Simple nodes-only format
             self.nodes_info = raw_config
 
-            print(f"✅ JSON 설정 로드 완료: {json_path}")
             print(f" 로드된 노드 수: {len(self.nodes_info)}")
             return True
 

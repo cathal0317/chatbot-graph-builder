@@ -11,6 +11,7 @@ class DialogueStage(Enum):
     SLOT_FILLING = "slot_filling"    # collect_, input, 수집, verification, select
     CONFIRMATION = "confirmation"    # confirm, 확인, 최종 확인
     COMPLETION = "completion"        # completion_, process_, approved, rejected
+    GOODBYE = "goodbye"               # 대화 종료 단계
     GENERAL_CHAT = "general_chat"    # 기타 일반 대화
 
 
@@ -28,6 +29,7 @@ class StageBasedNodeManager:
         DialogueStage.CONFIRMATION: [DialogueStage.SLOT_FILLING, DialogueStage.COMPLETION, DialogueStage.GENERAL_CHAT],
         DialogueStage.COMPLETION: [],
         DialogueStage.GENERAL_CHAT: [DialogueStage.SLOT_FILLING, DialogueStage.CONFIRMATION, DialogueStage.COMPLETION],
+        DialogueStage.GOODBYE: [],
     }
 
     def __init__(self, graph_info: GraphInfo):

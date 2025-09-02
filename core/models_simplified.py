@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional, Union, Annotated
 from uuid import uuid4
 from enum import Enum
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ============================================================================
@@ -19,55 +19,6 @@ class BaseConfig(BaseModel):
         validate_assignment=True,
         arbitrary_types_allowed=True
     )
-
-
-# ============================================================================
-# Node Stage Definitions
-# ============================================================================
-
-class NodeStage(str, Enum):
-    """Node stages for chatbot flow control"""
-    # 핵심 stages
-    INITIAL = "initial"
-    GREETING = "greeting"
-    SLOT_FILLING = "slot_filling"
-    VALIDATION = "validation"
-    CONFIRMATION = "confirmation"
-    PROCESSING = "processing"
-    FINAL = "final"
-    ERROR = "error"
-    DEFAULT = "default"
-    
-    # Extended stages
-    GENERAL_CHAT = "general_chat"
-    INTENT_DETECTION = "intent_detection"
-    DATA_COLLECTION = "data_collection"
-    API_INTEGRATION = "api_integration"
-    DECISION = "decision"
-    COMPLETION = "completion"
-    ERROR_HANDLING = "error_handling"
-    
-    @classmethod
-    def from_string(cls, stage_str: str) -> 'NodeStage':
-        """Convert string to NodeStage with fallback mapping"""
-        try:
-            return cls(stage_str)
-        except ValueError:
-            # Alias mapping for common variations
-            aliases = {
-                "start": cls.INITIAL,
-                "nlu": cls.INTENT_DETECTION,
-                "form_filling": cls.SLOT_FILLING,
-                "input_collection": cls.DATA_COLLECTION,
-                "selection": cls.DATA_COLLECTION,
-                "api_call": cls.API_INTEGRATION,
-                "integration": cls.API_INTEGRATION,
-                "end": cls.FINAL,
-                "flow_start": cls.GREETING,
-                "context_management": cls.PROCESSING,
-                "session_management": cls.PROCESSING,
-            }
-            return aliases.get(stage_str, cls.DEFAULT)
 
 
 # ============================================================================
@@ -121,6 +72,7 @@ class DialogueState(BaseConfig):
         self.previous_node = self.current_node
         self.current_node = node_name
         self.last_updated = datetime.now()
+
         
         if context_data:
             self.context.update(context_data)
@@ -192,31 +144,21 @@ class DialogueState(BaseConfig):
 
 class NodeConfig(BaseConfig):
     """Node configuration model"""
-    # Required fields
+    # 필수 필드
     name: str
-    stage: Union[str, NodeStage] = NodeStage.DEFAULT
     description: str
     
-    # Optional metadata
+    # 메타데이터
     ko_name: Optional[str] = None
-    visible: bool = True
     
     # Flow control
-    prev_nodes: List[Union[str, Dict[str, Any]]] = Field(default_factory=list)
+    next_nodes: List[Union[str, Dict[str, Any]]] = Field(default_factory=list)
     conditions: Dict[str, Any] = Field(default_factory=dict)
     
     # Content
     responses: Dict[str, str] = Field(default_factory=dict)
     actions: List[str] = Field(default_factory=list)
     params: Dict[str, Any] = Field(default_factory=dict)
-    
-    @field_validator('stage', mode='before')
-    @classmethod
-    def validate_stage(cls, v):
-        """Convert string stages to NodeStage enum"""
-        if isinstance(v, str):
-            return NodeStage.from_string(v)
-        return v
     
     @property
     def has_conditions(self) -> bool:
@@ -255,7 +197,6 @@ def create_node_config(name: str, config_dict: Dict[str, Any]) -> NodeConfig:
     
     # Set defaults for required fields
     config.setdefault('description', f"Node: {name}")
-    config.setdefault('stage', 'default')
     
     return NodeConfig(**config)
 

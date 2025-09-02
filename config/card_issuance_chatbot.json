@@ -11,7 +11,7 @@
     "actions": ["log_session_start", "init_card_application"],
     "params": {
       "bank_name": "마고은행",
-      "service_hours": "평일 09:00-18:00"
+      "service_hours": "평일 10:00-18:00"
     },
     "conditions": {},
     "next_nodes": ["collect_personal_info"]

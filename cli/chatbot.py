@@ -12,6 +12,8 @@ import logging
 from typing import Dict, Any
 from dotenv import load_dotenv
 
+
+
 # 프로젝트 경로 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.runtime.graph_info import load_and_validate
@@ -61,6 +63,23 @@ def validate_environment():
 
 def print_session_info(session_info: Dict[str, Any]):
     """Print session information"""
+    # session_info is the legacy dict; prefer data.session when available
+    data = session_info.get('data', {})
+    if data:
+        session = data.get('data', {}).get('session', {})
+        node = data.get('data', {}).get('node', {})
+        slots = data.get('data', {}).get('slots', [])
+        print(f"\n 세션 정보:")
+        print(f"   Session ID: {session.get('id')}")
+        print(f"   Current Node: {node.get('current')}")
+        print(f"   Turn Count: {session.get('turn_count')}")
+        print(f"   Status: {'Complete' if session.get('is_complete') else 'Active'}")
+        if slots:
+            print(f"   Collected Slots:")
+            for s in slots:
+                print(f"     - {s.get('name')}: {s.get('value')}")
+        return
+    # fallback legacy
     print(f"\n 세션 정보:")
     print(f"   Session ID: {session_info['session_id']}")
     print(f"   Current Node: {session_info.get('current_node', 'None')}")
@@ -236,33 +255,33 @@ Examples:
                     print(f"오류: {dst_result['response']}")
                     continue
                 
+                # 통합 계층 모델 사용
+                api_data = (dst_result.get('data') or {}).get('data', {})
+                message = api_data.get('message', {}).get('text', dst_result.get('response', ''))
+                session = api_data.get('session', {})
+                node = api_data.get('node', {})
+                context = api_data.get('context', {})
+                slots_list = api_data.get('slots', [])
+                
                 # 아웃풋 디스플레이
                 print("\n" + "="*60)
-                print(f"챗봇> {dst_result['response']}")
+                print(f"챗봇> {message}")
                 
                 # 디버깅 using verbose
                 if args.verbose:
-                    print(f"   [Debug] Node: {dst_result.get('current_node')}")
-                    ctx = dst_result.get('context') or {}
-                    print(f"   [Debug] NodeTurns: {ctx.get('node_turns')}")
-                    print(f"   [Debug] TotalTurns: {ctx.get('total_turns')}")
-                    print(f"   [Debug] Intent: {ctx.get('last_intent')}")
-                    print(f"   [Debug] Context: {ctx}")
-                    slots = dst_result.get('slots', {})
-                    if slots:
-                        print(f"   [Debug] Slots: {slots}")
+                    print(f"   [Debug] Node: {node.get('current')}")
+                    print(f"   [Debug] NodeTurns: {context.get('node_turns')}")
+                    print(f"   [Debug] TotalTurns: {session.get('turn_count')}")
+                    print(f"   [Debug] Intent: {context.get('last_intent')}")
+                    print(f"   [Debug] Context: {context}")
+                    if slots_list:
+                        slots_dict = {s.get('name'): s.get('value') for s in slots_list}
+                        print(f"   [Debug] Slots: {slots_dict}")
                 
                 # 세션 완료 체킹
-                if dst_result.get('session_complete'):
+                if session.get('is_complete') or dst_result.get('session_complete'):
                     print("\n대화 완료")
-                    restart = input("\n새로운 대화를 시작하시겠습니까? (y/n): ").strip().lower()
-                    if restart in ['y', 'yes', '예', 'ㅇ', '네']:
-                        session_id = str(uuid.uuid4())
-                        dst.start_session(session_id)
-                        print(f"새 세션 시작: {session_id}")
-                    else:
-                        break
-                
+            
             except KeyboardInterrupt:
                 print("\n\n 채팅을 종료합니다.")
                 break

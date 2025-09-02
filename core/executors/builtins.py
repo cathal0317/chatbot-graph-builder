@@ -63,44 +63,39 @@ class SlotFillingExecutor(BaseExecutor):
         required_slots = node_config.params.get('required_slots', [])
         
         slot_updates: Dict[str, Any] = {}
-        intent_data: Dict[str, Any] = {}
-        try:
-            intent_data = openai_client.extract_intent_entities(
-                user_message=user_message,
-                node_config=node_config.model_dump(),
-                context=dialogue_state.context
-            )
-            entities = intent_data.get('entities', {})
-            
-            # 필수 슬롯 
-            for entity_name, entity_value in entities.items():
-                if entity_name in required_slots and entity_value:
-                    slot_updates[entity_name] = {
-                        'value': entity_value,
-                        'confidence': intent_data.get('confidence', 0.8),
-                        'source': 'nlu'
-                    }
-            
-            # 엔티티 기반 보편 슬롯 업데이트 (NLU 주도)
-            for entity_name, entity_value in entities.items():
-                if not entity_value:
-                    continue
-                if entity_name in slot_updates:
-                    continue
+        # Reuse NLU results from DSTManager to avoid duplicate LLM calls
+        ctx = dialogue_state.context or {}
+        intent_data: Dict[str, Any] = {
+            'intent': ctx.get('last_intent'),
+            'entities': ctx.get('last_entities', {}) or {},
+            'confidence': ctx.get('last_confidence', 0.0),
+            'stage': ctx.get('last_stage')
+        }
+        entities = intent_data.get('entities', {})
+        
+        # 필수 슬롯 업데이트
+        for entity_name, entity_value in entities.items():
+            if entity_name in required_slots and entity_value:
                 slot_updates[entity_name] = {
                     'value': entity_value,
                     'confidence': intent_data.get('confidence', 0.8),
-                    'source': 'nlu_refilled' if dialogue_state.has_slot(entity_name) else 'nlu_auto'
+                    'source': 'nlu'
                 }
-        except Exception as e:
-            logger.warning(f"Entity extraction failed: {e}")
         
-        missing_slots = []
-        for slot in required_slots:
-            if not dialogue_state.has_slot(slot) and slot not in slot_updates:
-                missing_slots.append(slot)
+        # 엔티티 기반 보편 슬롯 업데이트 (NLU 주도)
+        for entity_name, entity_value in entities.items():
+            if not entity_value:
+                continue
+            if entity_name in slot_updates:
+                continue
+            slot_updates[entity_name] = {
+                'value': entity_value,
+                'confidence': intent_data.get('confidence', 0.8),
+                'source': 'nlu_refilled' if dialogue_state.has_slot(entity_name) else 'nlu_auto'
+            }
         
-        if intent_data.get('confidence', 1.0) < 0.5 and not slot_updates:
+        # 오프토픽/신뢰도 낮음 처리
+        if (intent_data.get('intent') == 'off_topic' or intent_data.get('confidence', 1.0) < 0.5) and not slot_updates:
             off_topic_count = dialogue_state.context.get('off_topic_count', 0)
             if off_topic_count >= 3:
                 return {
@@ -111,6 +106,12 @@ class SlotFillingExecutor(BaseExecutor):
             else:
                 return self.handle_off_topic_input(user_message, node_config, dialogue_state, openai_client)
         
+        # 현재 노드 기준으로 부족 슬롯 재계산
+        missing_slots = []
+        for slot in required_slots:
+            if not dialogue_state.has_slot(slot) and slot not in slot_updates:
+                missing_slots.append(slot)
+        
         if missing_slots:
             fallback_template = self.get_response_template(node_config, "initial")
             response = self.generate_natural_response(
@@ -118,7 +119,7 @@ class SlotFillingExecutor(BaseExecutor):
                 dialogue_state=dialogue_state,
                 user_message=user_message,
                 openai_client=openai_client,
-                intent_data={**intent_data, 'missing_slots': missing_slots},
+                intent_data={**intent_data, 'missing_slots': missing_slots, 'all_slots_filled': False},
                 fallback_template=fallback_template
             )
             next_node = "STAY_CURRENT"
@@ -129,7 +130,7 @@ class SlotFillingExecutor(BaseExecutor):
                 dialogue_state=dialogue_state,
                 user_message=user_message,
                 openai_client=openai_client,
-                intent_data={**intent_data, 'all_slots_filled': True},
+                intent_data={**intent_data, 'missing_slots': [], 'all_slots_filled': True},
                 fallback_template=fallback_template
             )
             next_node = None
@@ -156,15 +157,25 @@ class DefaultExecutor(BaseExecutor):
                 'context_updates': {'session_ended': True, 'end_reason': 'node_turn_limit'}
             }
         
-        intent_data: Dict[str, Any] = {}
-        try:
-            intent_data = openai_client.extract_intent_entities(
-                user_message=user_message,
-                node_config=node_config.model_dump(),
-                context=dialogue_state.context
-            )
-        except Exception as e:
-            logger.warning(f"Intent extraction failed: {e}")
+        # Reuse NLU results from DSTManager to avoid duplicate LLM calls
+        ctx = dialogue_state.context or {}
+        intent_data: Dict[str, Any] = {
+            'intent': ctx.get('last_intent'),
+            'entities': ctx.get('last_entities', {}) or {},
+            'confidence': ctx.get('last_confidence', 0.0),
+            'stage': ctx.get('last_stage')
+        }
+        
+        # Recompute missing_slots strictly from required_slots and DialogueState
+        required_slots = node_config.params.get('required_slots', []) if hasattr(node_config, 'params') else (node_config.get('params', {}) or {}).get('required_slots', [])
+        recomputed_missing = []
+        for slot in required_slots:
+            if not dialogue_state.has_slot(slot):
+                recomputed_missing.append(slot)
+        if recomputed_missing:
+            intent_data = {**(intent_data or {}), 'missing_slots': recomputed_missing, 'all_slots_filled': False}
+        else:
+            intent_data = {**(intent_data or {}), 'missing_slots': [], 'all_slots_filled': True}
         
         fallback_template = self.get_response_template(node_config)
         response = self.generate_natural_response(

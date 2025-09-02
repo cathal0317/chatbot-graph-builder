@@ -68,7 +68,7 @@ class OpenAIClient:
             {"role": "user", "content": user_prompt}
         ]
 
-        data: Dict[str, Any] = self.chat_json(messages, temperature=0.1)
+        data: Dict[str, Any] = self.chat_json(messages, temperature=0.0)
 
         # Safe post-processing: ensure required keys exist and types are sane
         if not isinstance(data, dict):
@@ -93,29 +93,6 @@ class OpenAIClient:
         except Exception:
             data["confidence"] = 0.5
 
-        # Normalize stage names to internal set
-        stage_raw = str(data.get("stage", "")).lower().strip()
-        stage_map = {
-            "start": "greetings",
-            "initial": "greetings",
-            "greeting": "greetings",
-            "info_collection": "slot_filling",
-            "slot_filling": "slot_filling",
-            "confirmation": "confirmation",
-            "final": "completion",
-            "completion": "completion",
-            "general": "general_chat",
-            "general_chat": "general_chat",
-            "fallback": "general_chat",
-        }
-        if stage_raw in stage_map:
-            data["stage"] = stage_map[stage_raw]
-        elif stage_raw:
-            data["stage"] = stage_raw
-        else:
-            data["stage"] = "general_chat"
-
-        # Off-topic heuristic: if intent looks unrelated and no entities/slots updated
         intent_name = str(data.get("intent", "")).lower()
         if intent_name in ("off_topic", "chitchat", "small_talk", "weather_inquiry"):
             data["intent"] = "off_topic"

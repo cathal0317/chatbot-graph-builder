@@ -7,7 +7,9 @@ from .condition_eval import ConditionEvaluator
 from .openai_client import OpenAIClient
 from storage.context_store import ContextStore
 from .runtime.graph_info import GraphInfo
-from .dialog.stage_manager import StageBasedNodeManager
+from .dialog.stage_manager import StageBasedNodeManager, DialogueStage
+from .api import build_api_response
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,31 +62,51 @@ class DSTManager:
 
             # Auto-run NLU to capture intent/entities/stage
             self._auto_extract_intent(user_message, node_info, dialogue_state)
+            # Log LLM-detected stage and context snapshot
+            try:
+                detected_stage = dialogue_state.context.get('last_stage')
+                logger.debug(f"[Stage] LLM detected stage: {detected_stage} (node={current_node})")
+            except Exception:
+                pass
 
-            # Select executor using node stage if present, otherwise default
-            node_stage = str(node_info.get('stage', 'default'))
+            # Select executor: prefer LLM-provided stage, then node config, then fallback
+            llm_stage = str(dialogue_state.context.get('last_stage') or '').strip().lower()
+            node_stage = llm_stage if llm_stage else str(node_info.get('stage', 'default'))
             if not node_stage or node_stage == 'default':
                 try:
                     node_stage = self.stage_manager.get_node_stage(current_node).value
                 except Exception:
                     node_stage = 'default'
+            logger.debug(f"[Stage] Executor stage selected: {node_stage}")
             executor = self.executor_factory.get(node_stage)
             execution_result = executor.execute(node_info, dialogue_state, user_message, self.openai_client)
 
             result_dict = execution_result.model_dump() if hasattr(execution_result, 'model_dump') else execution_result
             self._update_dialogue_state(dialogue_state, result_dict)
 
-            # Pre-compute stage intent for routing hints
+            # Pre-compute stage intent for routing hints (LLM-first)
             try:
                 current_stage = self.stage_manager.get_node_stage(current_node)
-                desired_next_stage = self.stage_manager.determine_next_stage(current_stage, dialogue_state.context)
+                llm_stage_str = str(dialogue_state.context.get('last_stage') or '').strip().lower()
+                desired_next_stage = DialogueStage(llm_stage_str) if llm_stage_str else None
+                if desired_next_stage is None:
+                    desired_next_stage = self.stage_manager.determine_next_stage(current_stage, dialogue_state.context)
             except Exception:
                 current_stage = None
                 desired_next_stage = None
+            # Log routing hints
+            try:
+                logger.debug(
+                    f"[Stage] Routing hints: current={getattr(current_stage, 'value', None)}, "
+                    f"llm={dialogue_state.context.get('last_stage')}, "
+                    f"desired={getattr(desired_next_stage, 'value', None)}"
+                )
+            except Exception:
+                pass
 
             # Determine next node:
             # 1) Use executor-provided next_node if present
-            # 2) Else use graph successors (prefer successors matching desired_next_stage)
+            # 2) Else use graph successors (prefer successors matching LLM stage, then rule-based desired_next_stage)
             # 3) Else use stage-based transition to pick a node from next stage
             next_node = result_dict.get('next_node')
             if next_node == "STAY_CURRENT":
@@ -98,12 +120,21 @@ class DSTManager:
             
             if not next_node:
                 succ = list(self.runtime.graph.successors(current_node))
-                if succ and desired_next_stage is not None:
-                    # Prefer successors whose classified stage matches desired_next_stage
-                    stage_matched = [n for n in succ if self.stage_manager.get_node_stage(n) == desired_next_stage]
-                    next_node = stage_matched[0] if stage_matched else succ[0]
+                if succ:
+                    # Prefer successors whose explicit node 'stage' matches LLM last_stage
+                    last_stage_str = str(last_stage).lower() if last_stage is not None else ''
+                    if last_stage_str:
+                        meta_matched = [n for n in succ if str(self.nodes_info.get(n, {}).get('stage') or '').lower() == last_stage_str]
+                        if meta_matched:
+                            next_node = meta_matched[0]
+                    if not next_node and desired_next_stage is not None:
+                        # Fallback: prefer successors whose classified stage matches desired_next_stage
+                        stage_matched = [n for n in succ if self.stage_manager.get_node_stage(n) == desired_next_stage]
+                        next_node = stage_matched[0] if stage_matched else succ[0]
+                    if not next_node:
+                        next_node = succ[0]
                 else:
-                    next_node = succ[0] if succ else None
+                    next_node = None
             
             if not next_node:
                 # Stage-based fallback path (no explicit successor)
@@ -135,6 +166,19 @@ class DSTManager:
 
             self.context_store.save_state(session_id, dialogue_state)
             
+            # Build structured API response via builder
+            try:
+                successors = list(self.runtime.graph.successors(dialogue_state.current_node))
+            except Exception:
+                successors = []
+            api_resp = build_api_response(
+                dialogue_state=dialogue_state,
+                response_text=result_dict.get('response', ''),
+                start_node=self.start_node,
+                node_stage=node_stage,
+                successors=successors,
+            )
+
             return {
                 'response': result_dict.get('response', '응답을 생성할 수 없습니다.'),
                 'session_id': session_id,
@@ -142,11 +186,46 @@ class DSTManager:
                 'turn_count': dialogue_state.turn_count,
                 'session_complete': dialogue_state.is_complete,
                 'slots': dialogue_state.get_filled_slots(),
-                'context': dialogue_state.context
+                'context': dialogue_state.context,
+                'data': api_resp.model_dump()
             }
         except Exception as e:
             logger.error(f"Error processing turn: {e}")
             return self._create_error_response("처리 중 오류가 발생했습니다.")
+
+    def get_session_info(self, session_id: str) -> Dict[str, Any]:
+        try:
+            dialogue_state = self.context_store.load_state(session_id)
+            if not dialogue_state:
+                return self._create_error_response("세션을 찾을 수 없습니다.")
+            try:
+                successors = list(self.runtime.graph.successors(dialogue_state.current_node))
+            except Exception:
+                successors = []
+            try:
+                node_stage = self.stage_manager.get_node_stage(dialogue_state.current_node).value
+            except Exception:
+                node_stage = 'default'
+            api_resp = build_api_response(
+                dialogue_state=dialogue_state,
+                response_text='',
+                start_node=self.start_node,
+                node_stage=node_stage,
+                successors=successors,
+            )
+            return {
+                'response': '',
+                'session_id': session_id,
+                'current_node': dialogue_state.current_node,
+                'turn_count': dialogue_state.turn_count,
+                'session_complete': dialogue_state.is_complete,
+                'slots': dialogue_state.get_filled_slots(),
+                'context': dialogue_state.context,
+                'data': api_resp.model_dump()
+            }
+        except Exception as e:
+            logger.error(f"Error loading session info: {e}")
+            return self._create_error_response("세션 정보를 불러오지 못했습니다.")
 
     def _auto_extract_intent(self, user_message: str, node_config: Dict[str, Any], dialogue_state: DialogueState):
         try:

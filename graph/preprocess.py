@@ -16,41 +16,32 @@ def normalize_raw_to_graphdef(raw: Dict[str, Any]) -> GraphDef:
         raise ValueError("JSON 파일이 비어있거나 딕셔너리 형태가 아닙니다.")
 
     nodes: Dict[str, NodeDef] = {}
-    edges: List[EdgeDef] = []
+    edges: list[EdgeDef] = []
 
-    for node_name, node_info in raw.items():
-        if not isinstance(node_info, dict):
-            node_info = {}
+    for node_name, node_cfg in raw.items():
+        # Build node definition
+        attrs = {
+            k: v for k, v in node_cfg.items()
+            if k not in ("next_nodes")
+        }
+        nodes[node_name] = NodeDef(name=node_name, attrs=attrs)
 
-        # Normalize attributes
-        stage = node_info.get("stage", "")
-        visible = bool(node_info.get("visible", True))
+        # Edges: source=node_name -> target=each next
+        next_nodes = node_cfg.get("next_nodes", [])
+        if not next_nodes:
+            continue
 
-        attrs = dict(node_info)
+        for nxt in next_nodes:
+            if isinstance(nxt, dict):
+                target = nxt.get("name")
+                context = nxt.get("context")
+            else:
+                target = str(nxt)
+                context = None
 
-        if "koName" in attrs:
-            attrs["ko_name"] = attrs.pop("koName")
-        else:
-            attrs.setdefault("ko_name", node_name)
+            if not target or target == node_name:
+                continue  # 빈 타겟/자기참조 방지
 
-        # remove fields that are promoted to NodeDef fields
-        attrs.pop("name", None)
-        attrs.pop("stage", None)
-        attrs.pop("visible", None)
-        prev_nodes = attrs.pop("prev_nodes", [])
+            edges.append(EdgeDef(source=node_name, target=target, context=context))
 
-        nodes[node_name] = NodeDef(name=node_name, stage=stage, visible=visible, attrs=attrs)
-
-        if prev_nodes:
-            for prev in prev_nodes:
-                if isinstance(prev, dict):
-                    source = prev.get("name")
-                    context = prev.get("context")
-                else:
-                    source = str(prev)
-                    context = None
-                if not source:
-                    continue
-                edges.append(EdgeDef(source=source, target=node_name, context=context))
-
-    return GraphDef(nodes=nodes, edges=edges) 
+    return GraphDef(nodes=nodes, edges=edges)

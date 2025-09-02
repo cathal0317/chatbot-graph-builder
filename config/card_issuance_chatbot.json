@@ -14,7 +14,7 @@
       "service_hours": "평일 09:00-18:00"
     },
     "conditions": {},
-    "prev_nodes": []
+    "next_nodes": ["collect_personal_info"]
   },
   
   "collect_personal_info": {
@@ -37,7 +37,7 @@
       "max_retries": 3
     },
     "conditions": {},
-    "prev_nodes": ["welcome"]
+    "next_nodes": ["select_card_type"]
   },
 
   "select_card_type": {
@@ -69,7 +69,7 @@
       }
     },
     "conditions": {},
-    "prev_nodes": ["collect_personal_info"]
+    "next_nodes": ["income_verification"]
   },
 
   "income_verification": {
@@ -94,7 +94,7 @@
       "min_employment_months": 6
     },
     "conditions": {},
-    "prev_nodes": ["select_card_type"]
+    "next_nodes": ["address_collection"]
   },
 
   "address_collection": {
@@ -117,7 +117,7 @@
       }
     },
     "conditions": {},
-    "prev_nodes": ["income_verification"]
+    "next_nodes": ["final_confirmation"]
   },
 
   "final_confirmation": {
@@ -149,7 +149,7 @@
         "value": "no"
       }
     },
-    "prev_nodes": ["address_collection"]
+    "next_nodes": ["process_application"]
   },
 
   "process_application": {
@@ -184,10 +184,14 @@
         "value": "rejected"
       }
     },
-    "prev_nodes": [
+    "next_nodes": [
       {
-        "name": "final_confirmation",
-        "context": "proceed_to_processing"
+        "name": "completion_approved",
+        "context": "application_approved"
+      },
+      {
+        "name": "completion_rejected",
+        "context": "application_rejected"
       }
     ]
   },
@@ -209,12 +213,7 @@
       "customer_service": "1588-1234"
     },
     "conditions": {},
-    "prev_nodes": [
-      {
-        "name": "process_application",
-        "context": "application_approved"
-      }
-    ]
+    "next_nodes": []
   },
 
   "completion_rejected": {
@@ -234,11 +233,6 @@
       "alternative_products": ["체크카드", "선불카드"]
     },
     "conditions": {},
-    "prev_nodes": [
-      {
-        "name": "process_application",
-        "context": "application_rejected"
-      }
-    ]
+    "next_nodes": []
   }
 } 

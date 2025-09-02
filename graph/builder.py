@@ -13,8 +13,6 @@ def build_nx_graph(graph_def: GraphDef) -> nx.DiGraph:
     # add nodes
     for node_name, node_def in graph_def.nodes.items():
         attrs: Dict[str, Any] = {
-            "stage": node_def.stage,
-            "visible": node_def.visible,
             **node_def.attrs,
         }
         g.add_node(node_name, **attrs)

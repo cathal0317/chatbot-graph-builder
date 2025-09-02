@@ -14,9 +14,8 @@ from dotenv import load_dotenv
 
 # 프로젝트 경로 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from loaders.node_loader import load_nodes, load_nodes_with_visualization
+from core.runtime.graph_info import load_and_validate
 from core.dst_manager import DSTManager
-from graph.graph_builder import GraphBuilder
 
 # API 키 로드
 load_dotenv()
@@ -78,24 +77,12 @@ def validate_only(config_path: str, verbose: bool = False) -> bool:
     """Validate configuration without running chatbot"""
     try:
         print(f"Validating configuration: {config_path}")
-        nodes = load_nodes(config_path, enable_graph_validation=True)
+        graph_info = load_and_validate(config_path)
         print(f"✅ Configuration validation completed successfully!")
-        print(f"   Total nodes: {len(nodes)}")
+        print(f"   Total nodes: {len(graph_info.nodes_info)}")
         return True
     except Exception as e:
         print(f"❌ Configuration validation failed: {e}")
-        return False
-
-def create_visualization(config_path: str, output_path: str, verbose: bool = False) -> bool:
-    """Create visualization without running chatbot"""
-    try:
-        print(f"Creating visualization for: {config_path}")
-        nodes = load_nodes_with_visualization(config_path, output_path)
-        print(f"✅ Visualization created successfully: {output_path}")
-        print(f"   Total nodes: {len(nodes)}")
-        return True
-    except Exception as e:
-        print(f"❌ Visualization creation failed: {e}")
         return False
 
 
@@ -109,14 +96,8 @@ Examples:
   # Basic usage
   python cli/chatbot.py --config config/sample_card_issuing.json
   
-  # With validation and visualization
-  python cli/chatbot.py --config config/sample_card_issuing.json --verbose --visualize output.png
-  
   # Validation only
   python cli/chatbot.py --config config/sample_card_issuing.json --validate-only
-  
-  # Create visualization only
-  python cli/chatbot.py --config config/sample_card_issuing.json --visualize-only output.png
   
   # Advanced usage
   python cli/chatbot.py --config config/custom_flow.json --redis --session-id abc123 --start-node greeting
@@ -164,18 +145,6 @@ Examples:
     )
     
     parser.add_argument(
-        '--visualize', 
-        metavar='OUTPUT_PATH',
-        help='Create visualization PNG and continue with chatbot'
-    )
-    
-    parser.add_argument(
-        '--visualize-only', 
-        metavar='OUTPUT_PATH',
-        help='Create visualization PNG and exit (no chatbot execution)'
-    )
-    
-    parser.add_argument(
         '--no-graph-validation', 
         action='store_true', 
         help='Disable enhanced graph validation (for faster loading)'
@@ -192,57 +161,34 @@ Examples:
         success = validate_only(args.config, args.verbose)
         sys.exit(0 if success else 1)
     
-    # Handle visualization-only mode
-    if args.visualize_only:
-       success = create_visualization(args.config, args.visualize_only, args.verbose)
-       sys.exit(0 if success else 1)
-    
-    # Validate environment (not needed for validation/visualization only)
+    # Validate environment (not needed for validation-only)
     if not validate_environment():
         sys.exit(1)
     
     try:
-        # Load node configuration with optional visualization
+        # Load GraphRuntime once and reuse
         logger.info(f"Loading nodes from: {args.config}")
+        graph_info = load_and_validate(args.config)
+        logger.info(f"Loaded {len(graph_info.nodes_info)} nodes")
         
-        enable_validation = not args.no_graph_validation
-        
-        if args.visualize:
-            # Load with visualization
-            nodes = load_nodes_with_visualization(args.config, args.visualize)
-            logger.info(f"Visualization saved to: {args.visualize}")
-        else:
-            # Load normally
-            nodes = load_nodes(args.config, enable_graph_validation=enable_validation)
-        
-        logger.info(f"Loaded {len(nodes)} nodes")
-        
-        # Initialize DST Manager
+        # Initialize DST Manager (graph-driven)
         logger.info("Initializing DST Manager...")
-        dst = DSTManager(
-            nodes_config=nodes, 
-            use_redis=args.redis,
-            start_node=args.start_node,
-            enable_llm_stage_detection=True  # LLM 스테이지 감지 활성화
-        )
+        dst = DSTManager(graph_info=graph_info, use_redis=args.redis, start_node=args.start_node)
         
         # Handle session ID
         session_id = args.session_id or str(uuid.uuid4())
         
         # If info mode, just show session info
-        if args.info:
-            session_info = dst.get_session_info(session_id)
-            if session_info:
-                print_session_info(session_info)
-            else:
-                print(f"Session {session_id} not found")
+        # (get_session_info kept for backward compatibility)
+        session_info = dst.get_session_info(session_id) if hasattr(dst, 'get_session_info') else None
+        if args.info and session_info:
+            print_session_info(session_info)
             return
         
         # Start or resume session
-        existing_session = dst.get_session_info(session_id)
-        if existing_session:
+        if session_info:
             print(f"Resuming session: {session_id}")
-            print_session_info(existing_session)
+            print_session_info(session_info)
         else:
             print(f"Starting new session: {session_id}")
             dst.start_session(session_id)
@@ -253,8 +199,6 @@ Examples:
         print("   - 'quit', 'exit', 'q': 종료")
         print("   - 'reset': 세션 리셋")
         print("   - 'info': 세션 정보 표시")
-        if args.visualize:
-            print(f"   그래프 시각화 옵션: {args.visualize}")
         print("="*60)
         print("안녕하세요! 무엇을 도와드릴까요?")
 
@@ -278,7 +222,7 @@ Examples:
                     continue
                 
                 elif user_input.lower() == 'info':
-                    session_info = dst.get_session_info(session_id)
+                    session_info = dst.get_session_info(session_id) if hasattr(dst, 'get_session_info') else None
                     if session_info:
                         print_session_info(session_info)
                     else:
@@ -299,8 +243,11 @@ Examples:
                 # 디버깅 using verbose
                 if args.verbose:
                     print(f"   [Debug] Node: {dst_result.get('current_node')}")
-                    print(f"   [Debug] Turn: {dst_result.get('turn_count')}")
-                    print(f"   [Debug] Context: {dst_result.get('context')}")
+                    ctx = dst_result.get('context') or {}
+                    print(f"   [Debug] NodeTurns: {ctx.get('node_turns')}")
+                    print(f"   [Debug] TotalTurns: {ctx.get('total_turns')}")
+                    print(f"   [Debug] Intent: {ctx.get('last_intent')}")
+                    print(f"   [Debug] Context: {ctx}")
                     slots = dst_result.get('slots', {})
                     if slots:
                         print(f"   [Debug] Slots: {slots}")
@@ -308,8 +255,6 @@ Examples:
                 # 세션 완료 체킹
                 if dst_result.get('session_complete'):
                     print("\n대화 완료")
-                    
-                    # Ask if user wants to start new session
                     restart = input("\n새로운 대화를 시작하시겠습니까? (y/n): ").strip().lower()
                     if restart in ['y', 'yes', '예', 'ㅇ', '네']:
                         session_id = str(uuid.uuid4())
@@ -339,6 +284,6 @@ Examples:
         logger.error(f"Initialization failed: {e}")
         print(f"초기화 실패: {e}")
         sys.exit(1)
-
+    
 if __name__ == "__main__":
     main() 

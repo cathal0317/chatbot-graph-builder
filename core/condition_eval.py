@@ -1,12 +1,11 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import re
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 class ConditionEvaluator:
-    #정의해 놓은 conditions 체킹 연산자
+    #정의해 놓은 conditions 체킹 연산자 추후 유저가 conditions 설정할때 활용
     
     def __init__(self):
         self.operators = {

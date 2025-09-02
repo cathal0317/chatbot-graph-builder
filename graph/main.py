@@ -10,8 +10,7 @@ def main() -> None:
     print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(base_dir, 'config', 'chatbot_config.json')
-    output_png = os.path.join(base_dir, 'dialog_graph.png')
+    config_path = os.path.join(base_dir, 'config', 'card_issuance_chatbot.json')
 
     builder = GraphBuilder()
 
@@ -31,13 +30,6 @@ def main() -> None:
     print(f"\n총 노드 수: {graph_info['graph_stats']['nodes']}")
     print(f"총 엣지 수: {graph_info['graph_stats']['edges']}")
     print(f"DAG 여부: {graph_info['graph_stats']['is_dag']}")
-
-    # 그래프 시각화
-    try:
-        builder.visualize_graph(output_png)
-        print(f"\n✅ 그래프 시각화 저장 완료: {output_png}")
-    except Exception as e:
-        print(f"\n⚠️ 그래프 시각화 스킵: {e}")
 
 
 if __name__ == "__main__":

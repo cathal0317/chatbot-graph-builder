@@ -8,7 +8,6 @@ from .validator import validate_graph
 from .toposort import kahn_toposort
 from .preprocess import load_json, normalize_raw_to_graphdef
 from .builder import build_nx_graph
-from .visualize import draw_with_legend
 
 __all__ = [
     'GraphBuilder',
@@ -16,6 +15,5 @@ __all__ = [
     'validate_graph',
     'kahn_toposort', 
     'load_json', 'normalize_raw_to_graphdef',
-    'build_nx_graph',
-    'draw_with_legend'
+    'build_nx_graph'
 ] 

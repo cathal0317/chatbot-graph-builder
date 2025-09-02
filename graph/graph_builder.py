@@ -9,7 +9,6 @@ from .preprocess import load_json, normalize_raw_to_graphdef
 from .builder import build_nx_graph
 from .validator import validate_graph
 from .toposort import kahn_toposort
-from .visualize import draw_with_legend
 
 
 class GraphBuilder:
@@ -24,7 +23,7 @@ class GraphBuilder:
                 print("❌ JSON 파일이 비어있거나 딕셔너리 형태로 입력되지 않았습니다.")
                 return False
 
-            # Simple nodes-only format
+            # raw JSON 파일 로드
             self.nodes_info = raw_config
 
             print(f" 로드된 노드 수: {len(self.nodes_info)}")
@@ -105,30 +104,8 @@ class GraphBuilder:
             "is_dag": cycle_result.success,
         }
 
-        stage_groups = {}
-        for node_name, node_info in self.nodes_info.items():
-            stage = node_info.get("stage", "unknown")
-            if stage not in stage_groups:
-                stage_groups[stage] = []
-            stage_groups[stage].append(node_name)
-
         return {
             "nodes": nodes_payload,
             "edges": edges_payload,
             "graph_stats": graph_stats,
-            "stage_groups": stage_groups,
-        }
-
-    def visualize_graph(self, save_path: str) -> None:
-        draw_with_legend(self.graph, save_path) 
-
-
-    def get_predecessors(self, node_name: str) -> List[str]:
-        if node_name not in self.graph:
-            return []
-        return list(self.graph.predecessors(node_name))
-
-    def get_successors(self, node_name: str) -> List[str]:
-        if node_name not in self.graph:
-            return []
-        return list(self.graph.successors(node_name))
+        } 
